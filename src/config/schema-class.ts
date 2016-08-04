@@ -12,7 +12,7 @@ interface PropertyMetaData {
   schema: any;  // The section schema related to this property.
 }
 
-function _resolveValue(metaData: PropertyMetaData) {
+function _getValue(metaData: PropertyMetaData) {
   let returnValue: any = metaData.config;
   for (const key of metaData.path) {
     returnValue = returnValue[key];
@@ -20,14 +20,22 @@ function _resolveValue(metaData: PropertyMetaData) {
   return returnValue;
 }
 
+function _setValue(metaData: PropertyMetaData, value: any) {
+  let parent: any = metaData.config;
+  for (const key of metaData.path.slice(0, -1)) {
+    parent = parent[key];
+  }
+  parent[metaData.path[metaData.path.length - 1]] = value;
+}
+
 function _setStringProperty(metaData: PropertyMetaData) {
   const {proto, name, schema} = metaData;
   Object.defineProperty(proto, name, {
     get: function() {
-      return _resolveValue(metaData);
+      return _getValue(metaData);
     },
     set: function(value: any) {
-      this._config[name] = value;
+      _setValue(metaData, value);
     }
   })
 }

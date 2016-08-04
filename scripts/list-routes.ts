@@ -1,5 +1,5 @@
-#!env node
-import {AngularProject} from '../src/project/project';
+#!/usr/bin/env -S TS_NODE_PROJECT=./scripts/tsconfig.json node -r ts-node/register
+import {AngularProject} from '@angular/services/project/project';
 
 const p = process.argv[2];
 AngularProject.fromPath(p)
