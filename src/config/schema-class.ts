@@ -1,57 +1,122 @@
-export class InvalidSchema extends Error {}
+import {NgToolkitError} from '../lib/error';
+
+export class InvalidSchema extends NgToolkitError {}
+export class InvalidPropertyAccess extends NgToolkitError {}
 
 interface PropertyMetaData {
-  config: any;  //
+  config: any;  // The actual JSON object.
   proto: any;  // The prototype on which we're applying the property.
   name: string;  // The name of the property.
   path: string[];  // A path to the property.
-  parentProto: any;  // The parent prototype, or null if root.
-  readOnly: boolean;  // Whether the property is readonly or not.
   root: any;  // The root prototype.
   rootSchema: any;  // The original root schema.
   schema: any;  // The section schema related to this property.
 }
 
-function _resolveValue(metaData: PropertyMetaData) {
+
+/**
+ * Get a value from the config metadata, based on its path.
+ * @returns {any}
+ * @private
+ */
+function _getValue(metaData: PropertyMetaData): any {
   let returnValue: any = metaData.config;
   for (const key of metaData.path) {
-    returnValue = returnValue[key];
+    if (key in returnValue) {
+      returnValue = returnValue[key];
+    } else {
+      if ('default' in metaData.schema) {
+        returnValue = metaData.schema['default'];
+      } else {
+        return undefined;
+      }
+    }
   }
   return returnValue;
 }
 
-function _setStringProperty(metaData: PropertyMetaData) {
-  const {proto, name, schema} = metaData;
-  Object.defineProperty(proto, name, {
-    get: function() {
-      return _resolveValue(metaData);
-    },
-    set: function(value: any) {
-      this._config[name] = value;
+
+/**
+ * Set a value in the config, and the dirty flag if the value differs..
+ * @private
+ */
+function _setValue(metaData: PropertyMetaData, value: any): void {
+  const {schema} = metaData;
+  let parentObject: any = metaData.config;
+  for (const key of metaData.path.slice(0, -1)) {
+    if (key in parentObject) {
+      parentObject = parentObject[key];
+    } else {
+      if ((typeof schema == 'object') && ('default' in schema)) {
+        parentObject = schema['default'];
+      } else {
+        throw new InvalidPropertyAccess();
+      }
     }
-  })
+  }
+  parentObject[metaData.path[metaData.path.length -1]] = value;
+}
+
+
+function _defineProperty(metaData: PropertyMetaData, options: any): void {
+  const {proto, name, schema} = metaData;
+
+  if ((typeof schema == 'object') && schema['readOnly']) {
+    Object.defineProperty(proto, name, {
+      enumerable: true,
+      get: options.get
+    });
+  } else {
+    Object.defineProperty(proto, name, {
+      enumerable: true,
+      get: options.get,
+      set: options.set
+    });
+  }
+}
+
+
+function _setPrimitiveProperty<T>(metaData: PropertyMetaData) {
+  _defineProperty(metaData, {
+    get(): T { return _getValue(metaData); },
+    set(value: T) { _setValue(metaData, value); }
+  });
+}
+
+function _setConstraintPrimitiveProperty<T>(metaData: PropertyMetaData,
+                                            constraintFn: (_: T) => T) {
+  _defineProperty(metaData, {
+    get(): T { return _getValue(metaData); },
+    set(value: T) { _setValue(metaData, constraintFn(value)); }
+  });
+}
+
+function _setTypedProperty<T>(metaData: PropertyMetaData, type: Constructor) {
+  _defineProperty(metaData, {
+    get(): T { return new type(_getValue(metaData)); },
+    set(value: T) { _setValue(metaData, value.toString()); }
+  });
 }
 
 function _setProperty(metaData: PropertyMetaData) {
   const {schema} = metaData;
-  switch(schema['type']) {
+  const type = (typeof schema == 'string') ? schema : schema['type'];
+  switch(type) {
     case 'object': _setObjectProperty(metaData); break;
-    case 'string': _setStringProperty(metaData); break;
+    case 'string': _setPrimitiveProperty(metaData); break;
+    case 'boolean': _setPrimitiveProperty(metaData); break;
+    case 'integer': _setConstraintPrimitiveProperty(metaData, (x) => Math.floor(x)); break;
+    case 'number': _setPrimitiveProperty(metaData); break;
+
+    case 'version': _setTypedProperty(metaData, function(x) => {
+        return version
+      });
+      break;
   }
 }
 
-function _setObjectProperty(metaData: PropertyMetaData, isRoot: boolean = false): void {
-  const {name, schema} = metaData;
-  let {proto} = metaData;
-  if (schema['type'] != 'object') {
-    throw new InvalidSchema();
-  }
-
-  if (!isRoot) {
-    proto = proto[name] = {
-      _config: metaData.root._config
-    };
-  }
+function _setProperties(metaData: PropertyMetaData, proto: any) {
+  const {schema} = metaData;
   for (const name of Object.keys(schema['properties'])) {
     const metaDataCopy = Object.assign({}, metaData);
 
@@ -65,22 +130,39 @@ function _setObjectProperty(metaData: PropertyMetaData, isRoot: boolean = false)
   }
 }
 
+function _setObjectProperty(metaData: PropertyMetaData): void {
+  const {name, schema, proto} = metaData;
+  if (schema['type'] != 'object') {
+    throw new InvalidSchema();
+  }
+
+  const newObject = {};
+  Object.defineProperty(proto, name, {
+    enumerable: true,
+    get: function() {
+      return newObject;
+    }
+  });
+
+  _setProperties(metaData, newObject);
+
+  if (!schema['additionalProperties']) {
+    Object.freeze(newObject);
+  }
+}
+
 
 export function SchemaClassBuilder(schema: any): any {
   const SchemaClass = function(config: any) {
-    this._config = config;
-
-    _setObjectProperty({
-      config: this._config,
+    _setProperties({
+      config: config,
       proto: SchemaClass.prototype,
       name: null,
       path: [],
-      parentProto: null,
-      readOnly: false,
       root: SchemaClass.prototype,
       rootSchema: schema,
       schema
-    }, true);
+    }, SchemaClass.prototype);
   };
 
   return SchemaClass;

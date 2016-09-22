@@ -20,6 +20,7 @@
   },
   "homepage": "https://github.com/angular/angular-toolkit#readme",
   "dependencies": {
+    "semver": "^5.1.0",
     "typescript": "^1.9.0-dev"
   },
   "devDependencies": {

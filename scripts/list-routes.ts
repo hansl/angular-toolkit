@@ -5,9 +5,11 @@ const p = process.argv[2];
 AngularProject.fromPath(p)
   .then((project: AngularProject) => {
     console.log('success!');
-    console.log(project.config.project.name);
+    project.config.project.version = '123';
+    console.log(project.config.project.version);
   })
   .catch((error: any) => {
-    console.error(error);
-    console.error(error.stack)
+    console.error('Error', error);
+    console.error(error.message);
+    console.error(error.stack);
   });
